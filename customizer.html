@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Rover Customizer</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root {
+      --rover-body: #c04;
+      --rover-accent: #ffd54f;
+      --rover-scale: 1;
+    }
+
+    /* Customizer panel */
+    .customizer {
+      position: fixed;
+      right: 12px;
+      top: 12px;
+      width: 260px;
+      background: rgba(255,255,255,0.97);
+      border: 1px solid #ddd;
+      padding: 12px;
+      box-shadow: 0 8px 22px rgba(0,0,0,0.12);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      z-index: 99999;
+      color: #111;
+      border-radius: 8px;
+    }
+    .customizer h3 { margin: 0 0 8px 0; font-size: 16px; }
+    .customizer label { display:block; margin:6px 0; font-size:13px; }
+    .customizer .row { display:flex; gap:8px; align-items:center; }
+    .customizer input[type="color"] { width:38px; height:28px; padding:0; border:0; background:transparent; }
+    .customizer input[type="text"] { width:100%; box-sizing:border-box; padding:6px; font-size:13px; }
+    .customizer input[type="range"] { width:100%; }
+    .customizer select, .customizer input[type="number"] { font-size:13px; padding:6px; }
+    .customizer .buttons { margin-top:8px; display:flex; flex-wrap:wrap; gap:6px; }
+    .customizer button { padding:6px 8px; font-size:13px; border-radius:6px; border:1px solid #ddd; background:#f6f6f6; cursor:pointer; }
+    .customizer button.primary { background: #0366d6; color: white; border-color: rgba(0,0,0,0.08); }
+    .customizer small { display:block; margin-top:8px; color:#666; font-size:12px; }
+
+    /* Minimal hooks for rover parts — your rover SVG/HTML should use these classes */
+    .rover-scaled { transform-origin: center; transform: scale(var(--rover-scale)); }
+    .rover-body { fill: var(--rover-body) !important; background-color: var(--rover-body); }
+    .rover-accent { fill: var(--rover-accent) !important; background-color: var(--rover-accent); }
+
+    /* Example wheel styles (these are class hooks; your rover should style .wheel-standard/.wheel-spoke/.wheel-tread as needed) */
+    .wheel-standard { /* default look */ }
+    .wheel-spoke { /* add spoke visuals via existing CSS or SVG */ }
+    .wheel-tread { /* add tread visuals via existing CSS or SVG */ }
+
+    /* Antenna element basic styling so they appear if your rover uses plain div antennas */
+    .customizer-demo-antenna {
+      width: 4px; height: 40px; background: #444; border-radius: 4px; margin: 2px;
+    }
+
+    /* Small responsive adjustments */
+    @media (max-width:420px){
+      .customizer { width: 92%; left:4%; right:4%; }
+    }
+  </style>
+</head>
+<body>
+  <!-- NOTE: This file is a single-file drop-in customizer. It does NOT change your rover markup.
+       For live preview the site needs an element with id="rover" and parts using the classes:
+         .rover-body, .rover-accent, .wheel (each wheel), .rover-antennas (container), .rover-name
+       If your rover uses different selectors I'll adapt the script — paste your rover HTML/SVG when ready.
+  -->
+
+  <div id="customizer" class="customizer" aria-label="Rover Customizer">
+    <h3>Rover Customizer</h3>
+
+    <label class="row">Body color: <input type="color" id="bodyColor" title="Body color"></label>
+    <label class="row">Accent color: <input type="color" id="accentColor" title="Accent color"></label>
+
+    <label>Size:
+      <input type="range" id="size" min="0.5" max="2.0" step="0.05" value="1" aria-label="Rover size">
+    </label>
+
+    <label>Wheel style:
+      <select id="wheelStyle" aria-label="Wheel style">
+        <option value="standard">Standard</option>
+        <option value="spoke">Spoke</option>
+        <option value="tread">Tread</option>
+      </select>
+    </label>
+
+    <label>Antennae:
+      <input type="number" id="antennaCount" min="0" max="6" value="2" style="width:72px" aria-label="Antenna count">
+    </label>
+
+    <label>Rover name:
+      <input type="text" id="roverName" placeholder="Stardance" aria-label="Rover name">
+    </label>
+
+    <div class="buttons">
+      <button id="applyBtn" class="primary">Apply</button>
+      <button id="saveBtn">Save</button>
+      <button id="loadBtn">Load</button>
+      <button id="exportBtn">Export</button>
+      <button id="importBtn">Import</button>
+      <input type="file" id="importFile" accept="application/json" style="display:none">
+      <button id="resetBtn">Reset</button>
+    </div>
+
+    <small>Tip: add id="rover" and use classes .rover-body, .rover-accent, .wheel, .rover-antennas, .rover-name in your rover markup (or tell me your selectors).</small>
+  </div>
+
+  <script>
+    (function(){
+      const defaultSettings = {
+        bodyColor: '#c04',
+        accentColor: '#ffd54f',
+        size: 1,
+        wheelStyle: 'standard',
+        antennaCount: 2,
+        roverName: 'Stardance'
+      };
+      const KEY = 'rover.custom.settings.v1';
+
+      const id = (s) => document.getElementById(s);
+      const bodyColor = id('bodyColor');
+      const accentColor = id('accentColor');
+      const size = id('size');
+      const wheelStyle = id('wheelStyle');
+      const antennaCount = id('antennaCount');
+      const roverName = id('roverName');
+      const applyBtn = id('applyBtn');
+      const saveBtn = id('saveBtn');
+      const loadBtn = id('loadBtn');
+      const exportBtn = id('exportBtn');
+      const importBtn = id('importBtn');
+      const importFile = id('importFile');
+      const resetBtn = id('resetBtn');
+
+      function loadFromStorage(){
+        try {
+          const raw = localStorage.getItem(KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch(e){ console.warn('Invalid saved settings', e); return null; }
+      }
+      function saveToStorage(s){
+        localStorage.setItem(KEY, JSON.stringify(s));
+      }
+
+      function setUIFromSettings(s){
+        bodyColor.value = s.bodyColor || defaultSettings.bodyColor;
+        accentColor.value = s.accentColor || defaultSettings.accentColor;
+        size.value = s.size ?? defaultSettings.size;
+        wheelStyle.value = s.wheelStyle || defaultSettings.wheelStyle;
+        antennaCount.value = s.antennaCount ?? defaultSettings.antennaCount;
+        roverName.value = s.roverName || defaultSettings.roverName;
+      }
+
+      function getSettingsFromUI(){
+        return {
+          bodyColor: bodyColor.value,
+          accentColor: accentColor.value,
+          size: parseFloat(size.value),
+          wheelStyle: wheelStyle.value,
+          antennaCount: parseInt(antennaCount.value,10),
+          roverName: roverName.value || defaultSettings.roverName
+        };
+      }
+
+      function applySettings(s){
+        // CSS variables for colors/scale
+        document.documentElement.style.setProperty('--rover-body', s.bodyColor);
+        document.documentElement.style.setProperty('--rover-accent', s.accentColor);
+        document.documentElement.style.setProperty('--rover-scale', s.size);
+
+        const rover = document.querySelector('#rover');
+        if(rover){
+          rover.classList.add('rover-scaled');
+          rover.setAttribute('data-wheel-style', s.wheelStyle);
+
+          // Wheels
+          const wheels = rover.querySelectorAll('.wheel');
+          wheels.forEach(w => {
+            w.classList.remove('wheel-standard','wheel-spoke','wheel-tread');
+            w.classList.add('wheel-' + s.wheelStyle);
+          });
+
+          // Antennas: adjust number inside .rover-antennas container
+          const antennasContainer = rover.querySelector('.rover-antennas');
+          if(antennasContainer){
+            const target = Math.max(0, Math.min(6, s.antennaCount));
+            while(antennasContainer.children.length < target){
+              const a = document.createElement('div');
+              a.className = 'antenna';
+              // minimal default style if rover has no antenna visuals
+              a.style.width = '4px';
+              a.style.height = '36px';
+              a.style.background = 'var(--rover-accent)';
+              a.style.margin = '2px';
+              antennasContainer.appendChild(a);
+            }
+            while(antennasContainer.children.length > target){
+              antennasContainer.removeChild(antennasContainer.lastChild);
+            }
+          }
+
+          // Name
+          const nameEl = rover.querySelector('.rover-name');
+          if(nameEl) nameEl.textContent = s.roverName;
+        } else {
+          console.warn('No #rover element found — the customizer applied site-wide CSS variables only.');
+        }
+      }
+
+      // Init
+      const saved = loadFromStorage();
+      setUIFromSettings(saved || defaultSettings);
+      applySettings(saved || defaultSettings);
+
+      // Handlers
+      applyBtn.addEventListener('click', () => {
+        const s = getSettingsFromUI();
+        applySettings(s);
+      });
+
+      saveBtn.addEventListener('click', () => {
+        const s = getSettingsFromUI();
+        saveToStorage(s);
+        alert('Settings saved locally.');
+      });
+
+      loadBtn.addEventListener('click', () => {
+        const s = loadFromStorage();
+        if(s){
+          setUIFromSettings(s);
+          applySettings(s);
+          alert('Loaded saved settings.');
+        } else alert('No saved settings found.');
+      });
+
+      exportBtn.addEventListener('click', () => {
+        const s = getSettingsFromUI();
+        const blob = new Blob([JSON.stringify(s, null, 2)], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'rover-settings.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      });
+
+      importBtn.addEventListener('click', () => importFile.click());
+      importFile.addEventListener('change', (ev) => {
+        const f = ev.target.files && ev.target.files[0];
+        if(!f) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const s = JSON.parse(reader.result);
+            setUIFromSettings(s);
+            applySettings(s);
+            saveToStorage(s);
+            alert('Imported settings and saved locally.');
+          } catch(e){ alert('Failed to import JSON: ' + e.message); }
+        };
+        reader.readAsText(f);
+      });
+
+      resetBtn.addEventListener('click', () => {
+        setUIFromSettings(defaultSettings);
+        applySettings(defaultSettings);
+        localStorage.removeItem(KEY);
+        alert('Reset to defaults.');
+      });
+
+      // Live preview
+      [bodyColor, accentColor, size, wheelStyle, antennaCount, roverName].forEach(input => {
+        input.addEventListener('input', () => {
+          applySettings(getSettingsFromUI());
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
